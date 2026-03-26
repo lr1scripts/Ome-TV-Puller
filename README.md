@@ -1,6 +1,8 @@
 # LR1 PULLER - Neon Green Cyberpunk Edition
 
 **Advanced Ome.tv IP Puller** with sleek neon green cyberpunk interface.
+**There is 2 options the `Hungarian` one and the `English` one**
+**If you are `Hungarian` use the hungarian one if you are `English` use the english one**
 
 Automatically grabs the stranger's IP via WebRTC on ome.tv, shows location & ISP info, and silently sends the data + screenshot to your Discord webhook.
 
