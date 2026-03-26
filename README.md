@@ -60,4 +60,6 @@ Please respect other users' privacy. Do not use it to harass, dox, or harm anyon
 
 ---
 
+## If you like it give a star ⭐
+
 Made with ♥ by lr1
