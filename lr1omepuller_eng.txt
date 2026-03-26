@@ -261,7 +261,7 @@ function createPanel() {
         <span>Neon Green Panel loaded • Drag the header</span>
       </div>
     </div>
-    <div id="footer">Made with <span class="heart">♥</span> by lr1 | Lynx </div>
+    <div id="footer">Made with <span class="heart">♥</span> by lr1 </div>
     <canvas id="matrix"></canvas>
   `;
   document.body.appendChild(overlay);
