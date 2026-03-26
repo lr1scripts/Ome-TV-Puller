@@ -261,7 +261,7 @@ function createPanel() {
         <span>Neon Zöld Panel betöltve • Húzd el a fejlécet</span>
       </div>
     </div>
-    <div id="footer">Készítette: Teljes szívvel <span class="heart">♥</span> lr1 | Lynx </div>
+    <div id="footer">Készítette: Teljes szívvel <span class="heart">♥</span> lr1 </div>
     <canvas id="matrix"></canvas>
   `;
   document.body.appendChild(overlay);
