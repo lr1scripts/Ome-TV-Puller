@@ -1,5 +1,5 @@
-  <img width="496" height="509" alt="image" src="https://github.com/user-attachments/assets/49488b36-8c63-4ee2-8a01-c93f7397faef" />
-  <img width="503" height="499" alt="image" src="https://github.com/user-attachments/assets/5d924e04-185f-4ee4-9957-f1ad7b16a4fb" />
+  <img width="496" height="509" alt="image" src="https://github.com/user-attachments/assets/49488b36-8c63-4ee2-8a01-c93f7397faef" /> <img width="503" height="499" alt="image" src="https://github.com/user-attachments/assets/5d924e04-185f-4ee4-9957-f1ad7b16a4fb" />
+
 
 
 # LR1 PULLER - Neon Green Cyberpunk Edition
